@@ -1,0 +1,24 @@
+<!-- templates/results.html -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Results {{ data.meta.run_id }}</title></head>
+<body>
+  <h1>Results {{ data.meta.run_id }}</h1>
+  <p>Query: {{ data.meta.query }} · Timestamp: {{ data.meta.timestamp }}</p>
+  <div>
+  {% for country, jobs in data.matches.items() %}
+    <h2>{{ country }} ({{ jobs|length }})</h2>
+    <div style="display:flex;flex-wrap:wrap">
+    {% for j in jobs %}
+      <div style="width:320px;border:1px solid #ddd;margin:8px;padding:8px;border-radius:6px">
+        <div style="font-weight:600">{{ j.title }}</div>
+        <div style="font-size:12px;margin:4px 0"><strong>{{ j.category }}</strong> · confidence {{ j.match.score|round(3) }}</div>
+        <div style="font-size:12px">{{ (j.raw|truncate(300)) }}</div>
+        <div style="margin-top:6px"><a href="{{ j.url }}" target="_blank">Open</a></div>
+      </div>
+    {% endfor %}
+    </div>
+  {% endfor %}
+  </div>
+</body>
+</html>

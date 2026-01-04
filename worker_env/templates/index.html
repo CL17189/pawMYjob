@@ -1,0 +1,15 @@
+<!-- templates/index.html -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Daily Job Scraper Runs</title></head>
+<body>
+  <h1>Runs</h1>
+  <ul>
+  {% for r in runs %}
+    <li>
+      {{ r.timestamp }} - <a href="/results/{{ r.run_id }}">{{ r.run_id }}</a>
+    </li>
+  {% endfor %}
+  </ul>
+</body>
+</html>

@@ -1,0 +1,12 @@
+# Worker: LangGraph + ML + helpers
+langgraph>=1.0.5
+langchain>=0.1.0
+
+sentence-transformers>=2.2.2
+numpy
+scikit-learn
+
+requests
+python-dotenv
+Flask
+load_dotenv
