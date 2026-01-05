@@ -1,24 +1,195 @@
 <!-- templates/results.html -->
 <!doctype html>
-<html>
-<head><meta charset="utf-8"><title>Results {{ data.meta.run_id }}</title></head>
-<body>
-  <h1>Results {{ data.meta.run_id }}</h1>
-  <p>Query: {{ data.meta.query }} · Timestamp: {{ data.meta.timestamp }}</p>
-  <div>
-  {% for country, jobs in data.matches.items() %}
-    <h2>{{ country }} ({{ jobs|length }})</h2>
-    <div style="display:flex;flex-wrap:wrap">
-    {% for j in jobs %}
-      <div style="width:320px;border:1px solid #ddd;margin:8px;padding:8px;border-radius:6px">
-        <div style="font-weight:600">{{ j.title }}</div>
-        <div style="font-size:12px;margin:4px 0"><strong>{{ j.category }}</strong> · confidence {{ j.match.score|round(3) }}</div>
-        <div style="font-size:12px">{{ (j.raw|truncate(300)) }}</div>
-        <div style="margin-top:6px"><a href="{{ j.url }}" target="_blank">Open</a></div>
-      </div>
-    {% endfor %}
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="icon" type="image/png" href="../static/icon.png" />
+  <title>Results {{ data.meta.run_id }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white font-sans min-h-screen p-6">
+
+  <!-- Header -->
+  <header class="mb-6">
+    <h1 class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">
+      Results: {{ data.meta.run_id }}
+    </h1>
+    <p class="text-gray-400 mt-1">
+      Query: <span class="font-semibold">{{ data.meta.query }}</span> · Timestamp: {{ data.meta.timestamp }} · Status: {{ data.meta.status }}
+    </p>
+  </header>
+
+  <!-- 功能组件 -->
+  <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+    <!-- 左侧展示模式切换 -->
+    <div class="flex items-center gap-2">
+      <button onclick="setMode('board')" id="btn-board" class="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 font-semibold">Board</button>
+      <button onclick="setMode('country')" id="btn-country" class="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 font-semibold">Country</button>
     </div>
-  {% endfor %}
+
+    <!-- 右侧操作控件 -->
+    <div class="flex items-center gap-2">
+      <input id="search-input" type="text" placeholder="Search..." class="px-3 py-2 rounded-lg text-black" oninput="applyFilters()">
+      <select id="sort-select" class="px-3 py-2 rounded-lg text-black" onchange="applyFilters()">
+        <option value="confidence_desc">Confidence ↓</option>
+        <option value="confidence_asc">Confidence ↑</option>
+        <option value="title_asc">Title A-Z</option>
+        <option value="title_desc">Title Z-A</option>
+      </select>
+      <select id="fontsize-select" class="px-3 py-2 rounded-lg text-black" onchange="applyFontSize()">
+        <option value="sm">Small</option>
+        <option value="base" selected>Base</option>
+        <option value="lg">Large</option>
+      </select>
+    </div>
   </div>
+
+  <!-- Main Grid -->
+  <main id="jobs-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    {% for country, jobs_by_query in data.matches.items() %}
+      {% for query, jobs in jobs_by_query.items() %}
+        {% for j in jobs %}
+        {% set border_color = '' %}
+        {% if j.category == 'must apply' %}
+          {% set border_color = 'from-yellow-400 to-pink-500' %}
+        {% elif j.category == 'recommended' %}
+          {% set border_color = 'from-blue-400 to-purple-500' %}
+        {% elif j.category == 'can apply' %}
+          {% set border_color = 'from-green-400 to-blue-500' %}
+        {% else %}
+          {% set border_color = 'from-gray-500 to-gray-700' %}
+        {% endif %}
+        <div class="job-card fade-in bg-gray-800 rounded-xl shadow-lg p-6 transform transition duration-300 hover:scale-105 hover:shadow-2xl border-t-4 border-transparent bg-gradient-to-t {{ border_color }}" data-title="{{ j.title }}" data-confidence="{{ j.llm.confidence }}" data-country="{{ country }}">
+          <div class="flex flex-col mb-3">
+            <div class="text-xl font-bold text-white">{{ j.title }}</div>
+            <a href="{{ j.company_url }}" target="_blank" class="text-purple-400 hover:text-pink-400 text-sm font-semibold mt-1">{{ j.company_name }}</a>
+          </div>
+          
+          <div class="text-gray-400 text-sm mb-2">
+            <p><strong>Workplace:</strong> {{ j.workplace_type|replace('\n',' ') }}</p>
+            <p><strong>Employment:</strong> {{ j.employment_type|replace('\n',' ') }}</p>
+          </div>
+
+          <div class="text-gray-200 text-sm mb-2">
+            <strong>Category:</strong> <span class="text-yellow-400">{{ j.category }}</span> · 
+            <strong>LLM Confidence:</strong> {{ j.llm.confidence }}%
+          </div>
+
+          <div class="text-gray-300 text-sm mb-2">
+            <strong>Description:</strong> {{ j.description|truncate(300) }}
+          </div>
+
+          {% if j.explanation %}
+          <div class="text-gray-300 text-sm mb-2 bg-gray-700 p-2 rounded">
+            <strong>Explanation:</strong> {{ j.explanation }}
+          </div>
+          {% endif %}
+
+          {% if j.skill_details %}
+          <div class="text-gray-200 text-sm mb-2">
+            <strong>Skill Hits:</strong> 
+            {% for skill, count in j.skill_details.items() %}
+              <span class="inline-block bg-purple-600 text-white px-2 py-1 rounded mr-1">{{ skill }} ({{ count }})</span>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          <div class="mt-4">
+            <a href="https://www.linkedin.com/jobs/view/{{ j.job_id }}" target="_blank" class="inline-block bg-pink-500 hover:bg-pink-600 text-white px-4 py-2 rounded font-semibold transition-colors">
+              Open Job
+            </a>
+          </div>
+        </div>
+        {% endfor %}
+      {% endfor %}
+    {% endfor %}
+    <!-- Load More 按钮 -->
+<div class="flex justify-center mt-6">
+  <button id="load-more-btn" class="px-6 py-3 bg-purple-600 hover:bg-purple-500 rounded-lg font-semibold">
+    Load More
+  </button>
+</div>
+  </main>
+
+  <!-- Scripts -->
+  <script>
+  let mode = 'board';
+  let visibleCount = 20; // 初始显示 20 条
+  const increment = 20;  // 每次加载 20 条
+
+  function setMode(newMode) {
+    mode = newMode;
+    document.getElementById('btn-board').classList.toggle('bg-purple-600', newMode==='board');
+    document.getElementById('btn-board').classList.toggle('bg-gray-700', newMode!=='board');
+    document.getElementById('btn-country').classList.toggle('bg-purple-600', newMode==='country');
+    document.getElementById('btn-country').classList.toggle('bg-gray-700', newMode!=='country');
+    
+    const cards = document.querySelectorAll('.job-card');
+    if(newMode==='board'){
+      cards.forEach(c => c.parentElement.classList.add('grid'));
+    } else {
+      cards.forEach(c => c.parentElement.classList.remove('grid'));
+    }
+  }
+
+  function applyFilters(){
+    const search = document.getElementById('search-input').value.toLowerCase();
+    const sort = document.getElementById('sort-select').value;
+    let cards = Array.from(document.querySelectorAll('.job-card'));
+    
+    // filter
+    cards.forEach(c => {
+      const title = c.dataset.title.toLowerCase();
+      const country = c.dataset.country.toLowerCase();
+      c.style.display = (title.includes(search) || country.includes(search)) ? 'block' : 'none';
+    });
+
+    // sort
+    cards.sort((a,b)=>{
+      if(sort==='confidence_desc') return b.dataset.confidence - a.dataset.confidence;
+      if(sort==='confidence_asc') return a.dataset.confidence - b.dataset.confidence;
+      if(sort==='title_asc') return a.dataset.title.localeCompare(b.dataset.title);
+      if(sort==='title_desc') return b.dataset.title.localeCompare(a.dataset.title);
+    });
+
+    const container = document.getElementById('jobs-container');
+    cards.forEach(c => container.appendChild(c));
+
+    // 重新应用分页
+    visibleCount = 20;
+    updateVisibleCards();
+  }
+
+  function applyFontSize(){
+    const size = document.getElementById('fontsize-select').value;
+    document.querySelectorAll('.job-card').forEach(c=>{
+      c.classList.remove('text-sm','text-base','text-lg');
+      if(size==='sm') c.classList.add('text-sm');
+      if(size==='base') c.classList.add('text-base');
+      if(size==='lg') c.classList.add('text-lg');
+    });
+  }
+
+  // 控制可见数量
+  function updateVisibleCards() {
+    const cards = Array.from(document.querySelectorAll('.job-card'));
+    cards.forEach((c, idx) => {
+      c.style.display = idx < visibleCount ? 'block' : 'none';
+    });
+
+    // 控制按钮显隐
+    const btn = document.getElementById('load-more-btn');
+    btn.style.display = visibleCount >= cards.length ? 'none' : 'block';
+  }
+
+  // Load More 点击事件
+  document.getElementById('load-more-btn').addEventListener('click', () => {
+    visibleCount += increment;
+    updateVisibleCards();
+  });
+
+  // 页面加载时先初始化
+  window.addEventListener('DOMContentLoaded', updateVisibleCards);
+  </script>
 </body>
 </html>

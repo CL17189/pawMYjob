@@ -37,7 +37,7 @@ def parse_resume_md(md_path: str) -> Dict:
     sections_norm = {k.strip().lower(): v for k, v in sections}
 
     # 找 skills 相关的 section（关键词）
-    skill_keys = [k for k in sections_norm.keys() if any(tok in k for tok in ("skill", "技能", "technology", "tech", "tech stack", "tools", "skills"))]
+    skill_keys = [k for k in sections_norm.keys() if any(tok in k for tok in ("skill", "技能", "technology", "tech", "tech stack", "tools", "skills","technologies"))]
     skills = []
     if skill_keys:
         # 取最后一个出现的技能段（通常用户把技能放末尾）

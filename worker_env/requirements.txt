@@ -10,3 +10,6 @@ requests
 python-dotenv
 Flask
 load_dotenv
+playwright
+
+langchain_google_genai

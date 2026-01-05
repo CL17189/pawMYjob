@@ -1,18 +1,19 @@
 # worker_env/src/langgraph_flow.py
 import argparse, os
-from .firecrawl_client import fetch_all_countries
+from .scrape_linkedin_jobs import fetch_all_countries_pos
 from .parse_md import parse_resume_md
 from .matcher import match_all
 from .renderer import persist_run_result, render_html_for_run
-from .utils import now_iso
+from .utils import now_iso,build_up_json
 
 def run_flow(resume_md_path: str, query: str="data engineer"):
     ts = now_iso()
     meta = {"timestamp": ts, "query": query, "status": "started"}
+    # 1. parse profile
     prof = parse_resume_md(resume_md_path)
-    profile_text = prof["raw"]
     # 2. fetch jobs
-    jobs = fetch_all_countries(query=query)
+    fetch_all_countries_pos(query=query)
+    jobs = build_up_json()
     # 3. match (matcher expects profile dict)
     matches = match_all(jobs, prof)
     # 4. persist and render
@@ -27,4 +28,4 @@ if __name__ == "__main__":
     parser.add_argument("--query", default="data engineer")
     args = parser.parse_args()
     out = run_flow(args.resume, args.query)
-    print(out)
+    #print(out)

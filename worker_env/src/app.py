@@ -1,5 +1,5 @@
 # src/app.py
-from flask import Flask, render_template, send_file, abort
+from flask import Flask, render_template, abort
 from pathlib import Path
 import json
 from .utils import RUNS_DIR
