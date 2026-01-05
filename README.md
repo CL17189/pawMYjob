@@ -270,7 +270,7 @@ http://localhost:8080
 
 2. Embedding similarity — job description + title are embedded and compared to the resume using sentence-transformers; this gives a normalized embedding score.
 
-3。 LLM evaluation — Gemini (configured via GEMINI_API_KEY or LLM client) is prompted to give a JSON containing:
+3. LLM evaluation — Gemini (configured via GEMINI_API_KEY or LLM client) is prompted to give a JSON containing:
 
     + confidence (0–100)
 
