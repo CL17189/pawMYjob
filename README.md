@@ -34,6 +34,30 @@ python -m worker_env.src.login_and_save_state
 worker_env/stored_data/linkedin_state.json
 ```
 
+如果通过 Google 登录时出现“此浏览器或应用可能不安全”，先尝试使用本机已安装的 Chrome：
+
+```bash
+python -m worker_env.src.login_and_save_state --channel chrome
+```
+
+如果仍被拦截，可以使用一个独立的、由你手动操作的 Chrome profile，再通过 CDP 导出登录态：
+
+```bash
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$PWD/worker_env/stored_data/chrome-login-profile" \
+  https://www.linkedin.com/login
+```
+
+保持这个 Chrome 窗口打开并完成登录，另开终端执行：
+
+```bash
+python -m worker_env.src.login_and_save_state \
+  --cdp-url http://127.0.0.1:9222
+```
+
+不要把日常 Chrome 的默认 profile 作为 `user-data-dir` 传入自动化程序；登录态文件和临时 profile 都应视为敏感数据。
+
 远程服务器可以在本机完成登录后用安全复制方式传到服务器，之后每日抓取只读这个 storage state。不要把它提交到 Git；它等价于登录态。若 LinkedIn 让它失效，重新执行 bootstrap 并替换文件。若服务器确实有桌面/远程桌面，也可以在那里运行 bootstrap，但生产服务仍建议 headless。
 
 ## 搜索配置
@@ -54,7 +78,7 @@ worker_env/stored_data/linkedin_state.json
 ]
 ```
 
-也可以直接在网页顶部编辑并保存。UI 的 `Today / 7 days / All time` 是展示过滤；LinkedIn 抓取窗口由每项 `posted_window` 控制。
+也可以直接在网页顶部编辑并保存。UI 的 `Past 24h / 7 days / All time` 是展示过滤，其中 `Past 24h` 与 LinkedIn 的 `f_TPR=r86400` 保持一致；LinkedIn 抓取窗口由每项 `posted_window` 控制。
 
 ## Gemini 与 apply skill
 

@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import sqlite3
-from datetime import datetime, time as clock_time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
@@ -235,7 +235,8 @@ def list_jobs(stage: str = "all", date_range: str = "all", country: str = "", qu
     if date_range in {"today", "7days"}:
         zone = ZoneInfo(os.getenv("TZ", "UTC"))
         local_now = datetime.now(zone)
-        local_start = datetime.combine(local_now.date(), clock_time.min, tzinfo=zone) if date_range == "today" else local_now - timedelta(days=7)
+        # Match LinkedIn's r86400 semantics: a rolling 24-hour window, not local midnight.
+        local_start = local_now - timedelta(hours=24) if date_range == "today" else local_now - timedelta(days=7)
         clauses.append("first_seen >= ?")
         params.append(local_start.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"))
     if country:

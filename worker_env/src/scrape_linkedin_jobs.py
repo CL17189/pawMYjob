@@ -75,8 +75,14 @@ def search_url(search: dict[str, Any]) -> str:
     url = f"https://www.linkedin.com/jobs/search/?keywords={query}"
     if search.get("geo_id"):
         url += f"&geoId={quote_plus(str(search['geo_id']))}"
-    window = search.get("posted_window", "7days")
-    url += f"&f_TPR={'r86400' if window == 'today' else 'r604800'}"
+    window = search.get("posted_window", search.get("posted_windows", "7days"))
+    tpr = {
+        "today": "r86400", "24h": "r86400", "1day": "r86400",
+        "7days": "r604800", "7d": "r604800", "week": "r604800",
+    }.get(str(window).strip().lower())
+    if not tpr:
+        raise ValueError(f"Unsupported posted_window={window!r}; use today or 7days")
+    url += f"&f_TPR={tpr}"
     return url
 
 

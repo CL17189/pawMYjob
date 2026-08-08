@@ -32,7 +32,7 @@
     </nav>
 
     <section class="filters">
-      <div class="range"><button class="range-btn active" data-range="today" onclick="setRange('today', this)">Today</button><button class="range-btn" data-range="7days" onclick="setRange('7days', this)">7 days</button><button class="range-btn" data-range="all" onclick="setRange('all', this)">All time</button></div>
+      <div class="range"><button class="range-btn active" data-range="today" onclick="setRange('today', this)">Past 24h</button><button class="range-btn" data-range="7days" onclick="setRange('7days', this)">7 days</button><button class="range-btn" data-range="all" onclick="setRange('all', this)">All time</button></div>
       <select id="country-filter" onchange="loadJobs()"><option value="">所有地方</option></select>
       <select id="query-filter" onchange="loadJobs()"><option value="">所有岗位</option></select>
       <input id="search-filter" placeholder="搜索标题、公司、城市…" oninput="renderJobs()">
