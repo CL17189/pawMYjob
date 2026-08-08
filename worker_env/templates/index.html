@@ -1,30 +1,80 @@
-<!-- templates/index.html -->
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <link rel="icon" type="image/png" href="static/icon.png" />
-  <title>Daily Job Scraper Runs</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>pawMYjob · Job cockpit</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
-<body class="bg-gray-900 text-white font-sans min-h-screen p-6">
-  <header class="mb-8">
-    <h1 class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">Daily Job Scraper Runs</h1>
-    <p class="text-gray-400 mt-2">Recent running records</p>
+<body>
+  <header class="topbar">
+    <div><div class="eyebrow">LOCAL JOB INTELLIGENCE</div><h1>pawMYjob <span>· 今日工作台</span></h1></div>
+    <div class="toolbar"><button class="ghost" onclick="runNow()">▶ 立即运行</button><span id="run-pill" class="pill">{{ '运行中' if run_state.running else '待机' }}</span></div>
   </header>
 
-  <main class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-    {% for r in runs %}
-    <div class="bg-gray-800 rounded-xl shadow-lg p-6 transform transition duration-300 hover:scale-105 hover:shadow-2xl">
-      <div class="flex items-center justify-between mb-4">
-        <span class="text-gray-400 text-sm">{{ r.timestamp }}</span>
-        <span class="bg-purple-600 text-white px-3 py-1 rounded-full text-xs font-semibold">{{ r.run_id }}</span>
-      </div>
-      <a href="/results/{{ r.run_id }}" class="block text-white font-semibold text-lg hover:text-pink-400 transition-colors">
-        Browse the result &rarr;
-      </a>
-    </div>
-    {% endfor %}
+  <main class="shell">
+    <section class="metrics">
+      <div class="metric"><small>全部职位</small><strong id="stat-total">{{ stats.total }}</strong></div>
+      <div class="metric"><small>待审核</small><strong id="stat-review">{{ stats.review }}</strong></div>
+      <div class="metric"><small>今日保留</small><strong id="stat-selected">{{ stats.selected }}</strong></div>
+      <div class="metric"><small>已投递</small><strong id="stat-applied">{{ stats.applied }}</strong></div>
+    </section>
+
+    <section class="config-card">
+      <div class="section-head"><div><div class="eyebrow">SEARCH PROFILES</div><h2>定制化搜索</h2></div><button class="ghost" onclick="saveSearches()">保存配置</button></div>
+      <textarea id="searches-json" spellcheck="false">{{ searches|tojson(indent=2) }}</textarea>
+      <p class="hint">每项填写 <code>country</code>、<code>query</code>，可选 <code>geo_id</code>、<code>location</code>、<code>posted_window</code>（today/7days）和 <code>enabled</code>。</p>
+    </section>
+
+    <nav class="tabs" aria-label="pipeline stages">
+      <button class="tab active" data-stage="all" onclick="selectStage('all', this)"><span>01</span>全部获取</button>
+      <button class="tab" data-stage="review" onclick="selectStage('review', this)"><span>02</span>地点与标签</button>
+      <button class="tab" data-stage="selected" onclick="selectStage('selected', this)"><span>03</span>今日保留</button>
+    </nav>
+
+    <section class="filters">
+      <div class="range"><button class="range-btn active" data-range="today" onclick="setRange('today', this)">Today</button><button class="range-btn" data-range="7days" onclick="setRange('7days', this)">7 days</button><button class="range-btn" data-range="all" onclick="setRange('all', this)">All time</button></div>
+      <select id="country-filter" onchange="loadJobs()"><option value="">所有地方</option></select>
+      <select id="query-filter" onchange="loadJobs()"><option value="">所有岗位</option></select>
+      <input id="search-filter" placeholder="搜索标题、公司、城市…" oninput="renderJobs()">
+    </section>
+
+    <section id="jobs" class="job-table-wrap"><div class="empty">正在加载职位…</div></section>
+    <p class="drag-help">提示：把职位行拖到下一个 tab，即可推进筛选阶段。人工状态会自动保存。</p>
   </main>
+  <div id="toast" class="toast"></div>
+  <script>
+    let stage='all', range='today', jobs=[];
+    const statuses = {new:'未投递', applied:'已投递', rejected:'已投递被挂', interview_rejected:'已面被挂', offer:'Offer'};
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
+    function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),2200); }
+    function selectStage(value, button){ stage=value; document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); button.classList.add('active'); loadJobs(); }
+    function setRange(value, button){ range=value; document.querySelectorAll('.range-btn').forEach(x=>x.classList.remove('active')); button.classList.add('active'); loadJobs(); }
+    async function loadJobs(){
+      const params=new URLSearchParams({stage,range}); const c=document.getElementById('country-filter').value; const q=document.getElementById('query-filter').value; if(c)params.set('country',c); if(q)params.set('query',q);
+      jobs=await fetch('/api/jobs?'+params).then(r=>r.json()); renderJobs(); fillFilters(); refreshStats();
+    }
+    function fillFilters(){
+      const values=(key)=>[...new Set(jobs.map(j=>j[key]).filter(Boolean))].sort();
+      [['country-filter','country','所有地方'],['query-filter','query','所有岗位']].forEach(([id,key,label])=>{ const el=document.getElementById(id), selected=el.value; el.innerHTML='<option value="">'+label+'</option>'+values(key).map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join(''); if(values(key).includes(selected))el.value=selected; });
+    }
+    function renderJobs(){
+      const term=document.getElementById('search-filter').value.toLowerCase(); const visible=jobs.filter(j=>JSON.stringify(j).toLowerCase().includes(term));
+      if(!visible.length){document.getElementById('jobs').innerHTML='<div class="empty">这个筛选条件下还没有职位。</div>';return;}
+      document.getElementById('jobs').innerHTML='<table><thead><tr><th>职位 / 公司</th><th>地方 · 来源</th><th>标签</th><th>评分</th><th>申请状态</th><th></th></tr></thead><tbody>'+visible.map(row).join('')+'</tbody></table>';
+      document.querySelectorAll('tr.job-row').forEach(el=>{el.addEventListener('dragstart',e=>e.dataTransfer.setData('job-id',el.dataset.id));el.addEventListener('dragend',()=>el.classList.remove('dragging'));});
+      document.querySelectorAll('details.json').forEach(d=>d.addEventListener('toggle',()=>d.closest('tr').classList.toggle('expanded',d.open)));
+    }
+    function row(j){
+      const tags=(j.tags||[]).map(t=>`<span class="tag ${t.toLowerCase().includes('security')?'bad':''}">${esc(t)}</span>`).join('');
+      return `<tr class="job-row" draggable="true" data-id="${j.id}"><td><a class="title" href="${esc(j.url||'#')}" target="_blank">${esc(j.title||'Untitled')}</a><div class="company">${esc(j.company_name||'')}</div><details class="json"><summary>查看全部 JSON</summary><pre>${esc(JSON.stringify(j.raw||j,null,2))}</pre></details></td><td><strong>${esc(j.location||j.country||'')}</strong><div class="muted">${esc(j.query||'')} · ${esc(j.first_seen||'')}</div></td><td>${tags||'<span class="muted">无特殊标签</span>'}<div class="muted reason">${esc(j.screening_reason||'')}</div></td><td><div class="score">${avg}<small>/ 10</small></div><div class="muted">语言 ${j.language_score==null?'—':Number(j.language_score).toFixed(1)} · 技能 ${j.skill_score==null?'—':Number(j.skill_score).toFixed(1)} · 匹配 ${j.fit_score==null?'—':Number(j.fit_score).toFixed(1)}</div>${links.length?'<div class="links">'+links.join(' · ')+'</div>':''}</td><td><select onchange="setStatus(${j.id},this.value)">${Object.entries(statuses).map(([v,l])=>`<option value="${v}" ${j.application_status===v?'selected':''}>${l}</option>`).join('')}</select></td><td><button class="more" onclick="advance(${j.id})">${stage==='all'?'→ 审核':stage==='review'?'→ 保留':'保存'}</button></td></tr>`;
+    }
+    async function advance(id){ const next=stage==='all'?'review':stage==='review'?'selected':'selected'; await fetch('/api/jobs/'+id+'/stage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stage:next})}); toast('筛选阶段已更新'); loadJobs(); }
+    async function setStatus(id,status){ await fetch('/api/jobs/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})}); toast('投递状态已保存'); refreshStats(); }
+    async function refreshStats(){ const s=await fetch('/api/jobs?stage=all&range=all').then(r=>r.json()); document.getElementById('stat-total').textContent=s.length; document.getElementById('stat-review').textContent=s.filter(x=>x.stage==='review').length; document.getElementById('stat-selected').textContent=s.filter(x=>x.stage==='selected').length; document.getElementById('stat-applied').textContent=s.filter(x=>x.application_status==='applied').length; }
+    document.querySelector('.tabs').addEventListener('dragover',e=>e.preventDefault()); document.querySelectorAll('.tab').forEach(tab=>tab.addEventListener('drop',async e=>{e.preventDefault();const id=e.dataTransfer.getData('job-id');if(id){await fetch('/api/jobs/'+id+'/stage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stage:tab.dataset.stage==='all'?'review':tab.dataset.stage})});toast('职位已移动');loadJobs();}}));
+    async function saveSearches(){ try{const payload=JSON.parse(document.getElementById('searches-json').value);const r=await fetch('/api/searches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});if(!r.ok)throw new Error((await r.json()).error);toast('搜索配置已保存');}catch(e){toast('配置错误：'+e.message);} }
+    async function runNow(){const r=await fetch('/api/run',{method:'POST'});toast(r.ok?'已启动增量运行':'运行已在进行中');document.getElementById('run-pill').textContent='运行中';}
+    loadJobs(); setInterval(async()=>{const x=await fetch('/api/runs').then(r=>r.json());document.getElementById('run-pill').textContent=x.state.running?'运行中':'待机';if(!x.state.running)refreshStats();},5000);
+  </script>
 </body>
 </html>

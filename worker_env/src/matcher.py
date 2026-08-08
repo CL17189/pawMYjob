@@ -11,8 +11,9 @@ load_dotenv(dotenv_path)
 
 # NOTE: your existing LLM flag (LANGCHAIN_API_KEY) is reused as a feature flag.
 # For Gemini you will typically set GOOGLE_API_KEY or GEMINI_API_KEY / GOOGLE_GENAI_USE_VERTEXAI etc.
-USE_LLM = bool(os.getenv("LANGCHAIN_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY"))
-if USE_LLM: os.environ["GOOGLE_API_KEY"] = os.getenv("LANGCHAIN_API_KEY")
+USE_LLM = bool(os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("LANGCHAIN_API_KEY"))
+if USE_LLM and not os.getenv("GOOGLE_API_KEY"):
+    os.environ["GOOGLE_API_KEY"] = os.getenv("GEMINI_API_KEY") or os.getenv("LANGCHAIN_API_KEY")
 
 # load embedding model (singleton)
 _EMB_MODEL = None
@@ -35,7 +36,7 @@ def embed_similarity(text_a: str, text_b: str) -> float:
 
 # ----- LLM scoring helper (LangChain / Google Gemini via langchain-google-genai) -----
 def call_llm_evaluate(job_title: str, job_text: str, profile_text: str, skills: List[str],
-                      model_name: str = "gemini-3-flash-preview",
+                      model_name: str | None = None,
                       temperature: float = 0.0,
                       max_job_tokens: int = 4000,
                       max_profile_tokens: int = 2000) -> Dict[str, Any]:
@@ -88,7 +89,7 @@ def call_llm_evaluate(job_title: str, job_text: str, profile_text: str, skills: 
     )
 
     # instantiate Gemini LLM
-    llm = ChatGoogleGenerativeAI(model=model_name, temperature=temperature)
+    llm = ChatGoogleGenerativeAI(model=model_name or os.getenv("GEMINI_MODEL", "gemini-3.6-flash"), temperature=temperature)
 
     # invoke: using tuple format (system/human) compatible with LangChain docs
     try:

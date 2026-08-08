@@ -1,127 +1,130 @@
-import time
-import json
+"""Playwright LinkedIn scraper with headed-login bootstrap and headless server mode."""
+
+from __future__ import annotations
+
+import datetime as dt
 import random
-from playwright.sync_api import sync_playwright, TimeoutError
+import time
+from pathlib import Path
+from typing import Any
+from urllib.parse import quote_plus
 
-STATE_PATH = "worker_env/stored_data/linkedin_state.json"
+from playwright.sync_api import TimeoutError, sync_playwright
+
+from .config import DATA_DIR, STATE_PATH
 
 
-def scroll_left_panel(page, rounds=5):
+def _text(page, selector: str) -> str | None:
+    element = page.query_selector(selector)
+    return element.inner_text().strip() if element else None
+
+
+def scroll_left_panel(page, rounds: int = 2) -> None:
     for _ in range(rounds):
-        page.mouse.wheel(0, 3000)
-        time.sleep(1)
+        page.mouse.wheel(0, 2600)
+        time.sleep(0.8)
 
-def scrape_jobs_on_page(page):
-    """抓取当前页面的所有职位信息"""
-    scroll_left_panel(page, rounds=1)
-    job_cards = page.query_selector_all("li[data-occludable-job-id]")
-    print(f"发现 {len(job_cards)} 个职位")
-    jobs = []
 
-    for idx, card in enumerate(job_cards, 1):
+def scrape_jobs_on_page(page, max_jobs: int = 100) -> list[dict[str, Any]]:
+    scroll_left_panel(page)
+    cards = page.query_selector_all("li[data-occludable-job-id]")
+    jobs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for card in cards[:max_jobs]:
         job_id = card.get_attribute("data-occludable-job-id")
-        print(f"[{idx}] 抓取 job_id={job_id}")
-
-        card.click()
+        if not job_id or job_id in seen:
+            continue
+        seen.add(job_id)
         try:
-            page.wait_for_selector("#job-details", timeout=8000)
-            time.sleep(2)
-            description = page.inner_text("#job-details")
+            card.click(timeout=5000)
+            page.wait_for_timeout(800)
+        except Exception:
+            continue
+        try:
+            page.wait_for_selector("#job-details, article", timeout=8000)
         except TimeoutError:
-            description = page.inner_text("article")
-
-        job_info = {"job_id": job_id}
-
-        # 职位标题
-        job_info["title"] = page.inner_text("h1.t-24.t-bold")
-
-        # 公司信息
+            pass
+        description = _text(page, "#job-details") or _text(page, "article") or ""
         company_el = page.query_selector(".job-details-jobs-unified-top-card__company-name a")
-        if company_el:
-            job_info["company_name"] = company_el.inner_text()
-            job_info["company_url"] = company_el.get_attribute("href")
-
-        # 工作类型 & 职位类型
-        workplace_type, employment_type = None, None
-        for btn in page.query_selector_all(".job-details-fit-level-preferences button"):
-            text = btn.inner_text()
-            if "办公" in text or "远程" in text:
-                workplace_type = text
-            if "全职" in text or "兼职" in text:
-                employment_type = text
-        job_info["workplace_type"] = workplace_type
-        job_info["employment_type"] = employment_type
-        
-        #位置
-        meta_el = page.query_selector("div.t-14.truncate")
-        meta_text = meta_el.inner_text() if meta_el else None
-        job_info["meta"] = meta_text
-
-
-        # 职位描述
-        job_info["description"] = description
-
-        jobs.append(job_info)
-        print("完成抓取")
-        time.sleep(1+random.random()*2)  # 随机等待，模拟人类行为
-
+        workplace_type = None
+        employment_type = None
+        for button in page.query_selector_all(".job-details-fit-level-preferences button"):
+            value = button.inner_text().strip()
+            if any(token in value.lower() for token in ("remote", "hybrid", "on-site", "på plats", "distans")):
+                workplace_type = value
+            if any(token in value.lower() for token in ("full-time", "part-time", "heltid", "deltid", "contract")):
+                employment_type = value
+        jobs.append({
+            "job_id": job_id,
+            "url": f"https://www.linkedin.com/jobs/view/{job_id}",
+            "title": _text(page, "h1.t-24.t-bold") or _text(page, "h1") or "",
+            "company_name": company_el.inner_text().strip() if company_el else None,
+            "company_url": company_el.get_attribute("href") if company_el else None,
+            "workplace_type": workplace_type,
+            "employment_type": employment_type,
+            "meta": _text(page, "div.t-14.truncate") or _text(page, ".job-details-jobs-unified-top-card__primary-description-container"),
+            "description": description,
+            "scraped_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        })
+        time.sleep(1.0 + random.random() * 2.0)
     return jobs
 
-def browse(SEARCH_URL,country_key,pos):
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context(storage_state=STATE_PATH)
+
+def search_url(search: dict[str, Any]) -> str:
+    query = quote_plus(str(search.get("query", "data engineer")))
+    url = f"https://www.linkedin.com/jobs/search/?keywords={query}"
+    if search.get("geo_id"):
+        url += f"&geoId={quote_plus(str(search['geo_id']))}"
+    window = search.get("posted_window", "7days")
+    url += f"&f_TPR={'r86400' if window == 'today' else 'r604800'}"
+    return url
+
+
+def browse_search(search: dict[str, Any], state_path: Path = STATE_PATH, headless: bool = True, max_pages: int = 10) -> list[dict[str, Any]]:
+    """Scrape one configured search and return raw-ish job records; no DB side effects."""
+    if not state_path.exists():
+        raise FileNotFoundError(f"Playwright state not found: {state_path}. Run login_and_save_state.py first.")
+    all_jobs: list[dict[str, Any]] = []
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=headless)
+        context = browser.new_context(storage_state=str(state_path))
         page = context.new_page()
-        page.goto(SEARCH_URL)
+        page.goto(search_url(search), wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(5000)
-
-        all_jobs = []
-
-        while True:
-            jobs = scrape_jobs_on_page(page)
-            all_jobs.extend(jobs)
-            print(f"当前总抓取数: {len(all_jobs)}")
-            
-            if len(all_jobs) >50:
-                print("为保证达到抓取上限，结束抓取")
+        for _ in range(max_pages):
+            before = len(all_jobs)
+            all_jobs.extend(scrape_jobs_on_page(page))
+            if len(all_jobs) >= 100:
                 break
-
-            # 检查“下一页”按钮是否存在且可点击
-            next_button = page.query_selector('button[aria-label="查看下一页"]')
-            if next_button and next_button.is_enabled():
-                print("点击下一页")
+            next_button = page.query_selector('button[aria-label*="next" i], button[aria-label*="下一页"]')
+            if not next_button or not next_button.is_enabled():
+                break
+            try:
                 next_button.click()
-                time.sleep(3)  # 等待页面加载
-            else:
-                print("没有下一页了，结束抓取")
+                page.wait_for_timeout(3000)
+            except Exception:
                 break
-
-        # 保存结果
-        with open(f"worker_env/stored_data/linkedin_jobs_{country_key}_{pos}.json", "w", encoding="utf-8") as f:
-            json.dump(all_jobs, f, ensure_ascii=False, indent=4)
-
+            if len(all_jobs) == before:
+                break
+        context.close()
         browser.close()
+    # Keep the legacy raw snapshot behavior as well as the new centralized snapshot.
+    unique: dict[str, dict[str, Any]] = {}
+    for item in all_jobs:
+        unique[str(item.get("job_id") or item.get("url") or len(unique))] = item
+    all_jobs = list(unique.values())
+    country = str(search.get("country", "unknown")).replace("/", "-")
+    query = str(search.get("query", "job")).replace("/", "-").replace(" ", "_")
+    path = DATA_DIR / f"linkedin_jobs_{country}_{query}_{dt.date.today().isoformat()}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    import json
+    path.write_text(json.dumps(all_jobs, ensure_ascii=False, indent=2), encoding="utf-8")
+    return all_jobs
 
 
-def fetch_all_countries_pos(query : str="data engineer"):
-    """
-    query: str = "data engineer" or "data engineer|software engineer"
-    we will parse the query to get multiple positions if '|' is present
-    """
-    positions = [q.strip() for q in query.split("|")]
-    
-    #country={"sweden": "105117694","danmark":"104514075","germany":"101282230"}
-    country={"sweden": "105117694"}
-    
-
-    for country_key in country.keys():
-        for pos in positions:
-            search_url = (
-                "https://www.linkedin.com/jobs/search/"
-                f"?keywords={pos.replace(' ', '%20')}"
-                f"&geoId={country[country_key]}"
-                "&f_TPR=r86400"
-            )
-            print(f"开始抓取职位: {country_key,"    ",pos}")
-            browse(search_url,country_key,pos)
-            
+def fetch_all_countries_pos(query: str = "data engineer") -> None:
+    """Legacy wrapper retained for callers from the original project."""
+    from .config import load_searches
+    searches = [s for s in load_searches() if s.get("query") in query.split("|")]
+    for search in searches:
+        browse_search(search, state_path=STATE_PATH, headless=True)

@@ -1,327 +1,106 @@
 # pawMYjob
-<p align="center">
-  <img src="worker_env/static/icon.png" width="120" alt="pawMYjob icon">
-</p>
 
-pawMYjob is a local, privacy-first job discovery and recommendation system that scrapes new LinkedIn job postings in selected European countries, scores and explains fit between a candidate (resume.md) and each job using embeddings + an LLM (Gemini), and presents results in a clean two-page UI (pipeline status + job results). The project is designed to run entirely locally (Airflow scheduler + a worker process) and ships with a small launcher to help users bootstrap configuration (API keys, resume upload) and run the system.
+一个本地优先的求职流水线：每天从配置的 LinkedIn 搜索中抓取职位，保留原始字段和快照，只对新增/描述变化的职位做门槛筛选、语言/技能/简历匹配，并为高分职位生成 LaTeX 简历和 cover letter。
 
----
-## Features
-
-+ Upload a single resume.md containing experience, education, projects and an explicit skills section.
-
-+ Daily scraping of LinkedIn job search pages for selected countries (Sweden, Denmark, Norway, Finland, Germany). Playwright-based crawler used for robust page rendering.
-
-+ Ranking & explanation:
-    +Embedding-based semantic similarity (sentence-transformers).
-
-    + LLM (Gemini) used to produce a human-readable confidence (0–100), short explanation, and a label: must apply, recommended, can apply, general.
-
-    +Final score is a calibrated mix of embedding and LLM outputs.
-
-+ UI:
-  + Status page showing daily Airflow runs and run status.
-
-  + Result page with three visualization modes: table, board (cards per role), and country (cards grouped by country).
-
-  + Job card contents: title, work percentage (full-time/part-time if present), posted date, deadline (if present), job link, AI confidence, short job description text, and LLM explanation.
-
-+ Local-first: all data and keys are stored locally. No external storage required.
-
-+ Safe operation: the system discovers and recommends jobs only — it does not automatically submit applications.
-
-<div>
-<p align="center">
-  <img src="image.png" width="600" alt="pawMYjob icon">
-</p>
-<p align="center">
-  <img src="image-1.png" width="600" alt="pawMYjob icon">
-</p>
-<p align="center">
-  <img src="image-2.png" width="600" alt="pawMYjob icon">
-</p>
-</div>
-
-## Architecture
-```bash
-[Airflow scheduler]               # airflow_env
-        |
-     triggers
-        |
-[Worker process (LangGraph)] -----> [Playwright crawler]  (scrape & extract job links)
-        |                           [Firecrawl optional MCP/REST]
-        |
-   [Matcher: embeddings + Gemini LLM]
-        |
-   persist results -> stored_data/runs/*.json
-        |
-[Flask frontend]  (status & results) -> http://localhost:8000
-```
-
-+ Airflow: schedule & orchestration (runs daily at configured time; calls worker Python in a separate venv).
-
-+ Worker: contains scraping, matching, and renderer logic (separate virtualenv to avoid dependency conflicts with Airflow).
-
-+ Frontend: minimal Flask + Jinja templates (two pages).
-
-+ Launcher (optional): small local web form to provide resume.md and API keys and to start the worker + frontend.
-
-## Quick start (developer / local)
-`These are minimal instructions for a developer machine (macOS/Linux). Replace paths as necessary.`
-
-### Prerequisites
-
-+ Python 3.10+ (or compatible)
-
-+ Git
-
-+ Playwright browsers (if using Playwright crawler)
-  
-### Example .env
-```makefile
-LANGCHAIN_API_KEY = AAAAAAAAAAAAAA
-```
-
-### Install & run (recommended flow)
-
-```bash
-# Airflow env (only scheduler/orchestrator)
-python3 -m venv airflow_env/.venv
-source airflow_env/.venv/bin/activate
-pip install -r airflow_env/requirements.txt
-deactivate
-
-# Worker env (scraper, embeddings, LLM, frontend)
-python3 -m venv worker_env/.venv
-source worker_env/.venv/bin/activate
-pip install -r worker_env/requirements.txt
-
-# If using Playwright:
-pip install playwright
-playwright install
-deactivate
-
-```
-
-## Install & Run (Recommended Flow)
-
-This project uses **two isolated virtual environments** to avoid dependency conflicts
-between Airflow and LLM / scraping workloads.
-
----
-
-### 1. Create virtual environments
-
-#### 1.1 Airflow environment (scheduler only)
-
-```bash
-python3 -m venv airflow_env/.venv
-source airflow_env/.venv/bin/activate
-
-pip install -r airflow_env/requirements.txt
-
-deactivate
-```
-
----
-
-#### 1.2 Worker environment (scraping + LLM + frontend)
-
-```bash
-python3 -m venv worker_env/.venv
-source worker_env/.venv/bin/activate
-
-pip install -r worker_env/requirements.txt
-```
-
-If Playwright is used:
-
-```bash
-pip install playwright
-playwright install
-```
-
----
-
-### 2. Prepare resume and environment variables
-
-#### 2.1 Resume file
-
-Place your resume at:
+## 重构后的流程
 
 ```text
-worker_env/stored_data/resume.md
+config/searches.json
+        ↓ 每日 15:00（TZ）
+Playwright headless crawl + raw daily snapshot
+        ↓ upsert / compare previous state
+SQLite jobs + observations
+        ↓ only new or changed jobs
+Swedish / citizenship-security / senior tags
+        ↓ exclude citizenship-security jobs
+language score + existing explicit-skills score + Gemini fit score
+        ↓ average > 6
+resume.tex + cover_letter.tex (+ optional resume.pdf)
+        ↓
+Flask :8000  ·  email daily summary
 ```
 
-Recommended structure (example):
+数据库在 `worker_env/stored_data/pawmyjob.sqlite3`，原始每日快照在 `worker_env/stored_data/snapshots/`，生成文件在 `worker_env/stored_data/artifacts/<job_id>/`。旧的 `linkedin_jobs_*.json` 也继续写出，原始抓取字段不会丢失。
 
-```markdown
-## Experience
-...
+## Playwright 在服务器上如何工作
 
-## Education
-...
+服务器通常没有图形界面，因此 Docker 默认使用 `PLAYWRIGHT_HEADLESS=true`。第一次 LinkedIn 登录不能在无头模式里“手动完成”，只需要做一次 headed bootstrap：
 
-## Projects
-...
+```bash
+# 在有桌面的本机执行；浏览器打开后手动登录并在终端按 Enter
+python -m worker_env.src.login_and_save_state
 
-## Skills
-- Python
-- Data Engineering
-- Airflow
-- SQL
-- Spark,hive,flink
-- Cloud Platforms
+# 确认下面文件作为受保护的 secret volume 复制到服务器
+worker_env/stored_data/linkedin_state.json
 ```
 
-The **Skills** section will be heavily used for matching and LLM evaluation.
+远程服务器可以在本机完成登录后用安全复制方式传到服务器，之后每日抓取只读这个 storage state。不要把它提交到 Git；它等价于登录态。若 LinkedIn 让它失效，重新执行 bootstrap 并替换文件。若服务器确实有桌面/远程桌面，也可以在那里运行 bootstrap，但生产服务仍建议 headless。
 
----
+## 搜索配置
 
-#### 2.2 Environment variables
+编辑 `config/searches.json`，可以增加 Sweden、Germany、New Zealand/Auckland 或任何关键词组合：
 
-Create a `.env` file under `worker_env/`:
+```json
+[
+  {
+    "name": "Germany · Data Engineer",
+    "country": "germany",
+    "location": "Germany",
+    "geo_id": "101282230",
+    "query": "data engineer",
+    "enabled": true,
+    "posted_window": "7days"
+  }
+]
+```
+
+也可以直接在网页顶部编辑并保存。UI 的 `Today / 7 days / All time` 是展示过滤；LinkedIn 抓取窗口由每项 `posted_window` 控制。
+
+## Gemini 与 apply skill
+
+将 `.env.example` 复制为 `.env`，填写 `GEMINI_API_KEY`。当前默认模型是 `gemini-3.6-flash`，可通过 `GEMINI_MODEL` 覆盖。
+
+Gemini 请求分为两种节流策略：匹配评估请求默认间隔 8 秒（`GEMINI_REQUEST_DELAY_SECONDS`），生成 resume/cover letter 的请求默认间隔 30 秒（`GEMINI_GENERATION_DELAY_SECONDS`）。生成节流使用 `worker_env/stored_data/.gemini_generation_rate` 加跨进程文件锁，因此 Docker 的 web 和 scheduler 共享同一个生成请求节奏；每次重试也会重新等待完整间隔。若 Google 返回 429，程序会读取 `Retry-After`/`retryDelay` 并采用退避等待。
+
+旧配置中的 `GEMINI_DELAY_SECONDS` 仍可作为评估请求的兼容别名。Google AI Studio/API 的免费层和限额会随时间变化，不要把它当作无限生产配额。
+
+`apply` 仓库本身是一个 `SKILL.md` 规范，要求不虚构简历事实、输出 ATS 友好的 LaTeX，并在有 `pdflatex` 时编译 PDF。此项目用 Gemini agent 执行同一套约束；如果本地已 clone skill，可以设置：
 
 ```env
-LLM_PROVIDER=gemini
-GEMINI_API_KEY=your_gemini_api_key_here
-FIRECRAWL_API_KEY=your_firecrawl_api_key_here
-OPENAI_API_KEY=
+APPLY_SKILL_PATH=/path/to/apply
+COMPILE_LATEX=true
 ```
 
-Note: `.env` should NOT be committed to Git.
+没有 `pdflatex` 时仍会生成 `.tex`，UI 可以直接下载。只有语言、技能、Gemini 三项平均分 `> 6` 才会生成申请材料。
 
----
-
-### 3. Run worker pipeline manually (single run)
+## 本地运行
 
 ```bash
+python3 -m venv worker_env/.venv
 source worker_env/.venv/bin/activate
+pip install -r worker_env/requirements.txt
+playwright install chromium
 
-python -m worker_env.src.langgraph_flow \
-  --resume worker_env/stored_data/resume.md \
-  --query "data engineer"
-
-deactivate
+cp .env.example .env
+# 放入 resume.md 或 resume.pdf，以及上面的 storage state
+python -m worker_env.src.run_pipeline --no-email
+python -m worker_env.src.app
 ```
 
-This will:
+打开 <http://localhost:8000>。页面支持三阶段 tab、国家/岗位过滤、JSON 展开、拖拽推进和申请状态：未投递、已投递、已投递被挂、已面被挂、Offer。
 
-- Scrape LinkedIn job postings
-- Match jobs against your resume
-- Call LLM to compute confidence scores and labels
-- Generate structured JSON results
-
----
-
-### 4. Start frontend server
+## Docker 与每日 15:00
 
 ```bash
-source worker_env/.venv/bin/activate
-
-export FLASK_APP=worker_env.src.app
-flask run --port 8000
+cp .env.example .env
+# 先把 resume、linkedin_state.json 放到 worker_env/stored_data/
+docker compose up -d --build
 ```
 
-Open in browser:
+`web` 暴露 8000，`scheduler` 按 `TZ` 在每天 15:00 执行一次。邮件汇报只在 `.env` 填好 `SMTP_HOST`、`REPORT_FROM_EMAIL`、`REPORT_TO_EMAIL` 后发送；没有 SMTP 配置不会尝试联网发信。
 
-```text
-http://localhost:8000
-```
+## 安全边界
 
----
-
-### 5. Enable Airflow scheduling (optional)
-
-DAG file location:
-
-```text
-airflow_env/dags/daily_job_scraper.py
-```
-
-Typical DAG task command:
-
-```bash
-/full/path/to/worker_env/.venv/bin/python \
-  -m worker_env.src.langgraph_flow \
-  --resume /full/path/to/worker_env/stored_data/resume.md \
-  --query "data engineer"
-```
-
-Start Airflow:
-
-```bash
-source airflow_env/.venv/bin/activate
-
-airflow db init
-airflow webserver -p 8080
-airflow scheduler
-```
-
-Airflow UI:
-
-```text
-http://localhost:8080
-```
-
-## How matching & scoring works (concise)
-
-1. Candidate profile extraction — parse_md.py extracts raw text and a skills list (prefer last Skills markdown section).
-
-2. Embedding similarity — job description + title are embedded and compared to the resume using sentence-transformers; this gives a normalized embedding score.
-
-3. LLM evaluation — Gemini (configured via GEMINI_API_KEY or LLM client) is prompted to give a JSON containing:
-
-    + confidence (0–100)
-
-    + label (must apply / recommended / can apply / general)
-
-    + explanation (1–3 sentence rationale)
-
-4. Final score — LLM confidence (if available) is combined with embedding score for stability (configurable weights; default is 70% LLM, 30% embedding).
-
-5. Output — each job JSON contains embed_score, final_score, category, llm.explanation, evaluated_at. Renderer builds cards and tables for UI.
-
-## Data & privacy / compliance
-
-+ This project only discovers and recommends jobs. It does not submit applications automatically.
-
-+ Respect LinkedIn's terms of service and robots.txt. Use the Playwright crawler responsibly (rate-limiting and retries are implemented).
-
-+ Keep API keys and resume files local — do not commit them to Git.
-
-## Troubleshooting (common issues)
-
-+ Airflow install fails: Airflow has many system dependencies. If local installation is difficult, run Airflow in Docker or use a lightweight scheduler (cron) for dev.
-
-+ Playwright not rendering: Ensure you ran playwright install after installing the package.
-
-+ LLM errors: Verify GEMINI_API_KEY or other LLM credentials and network access. The matcher falls back to embedding-based scoring if LLM is not available.
-
-+ Dependencies conflict between Airflow and worker: keep airflow_env and worker_env virtualenvs separate. The DAG should invoke worker Python as a subprocess.
-
-## Development notes & extension ideas
-
-+ Add user authentication for multi-user deployments (local-first design can be extended).
-
-+ Add export options: CSV / JSON / One-click copy of application text.
-
-+ Add more sophisticated resume parsing (structured extraction of years, titles, company names).
-
-+ Add a small review / annotation UI so a user can accept/reject suggestions and feed that back into fine-tuning.
-
-## Contributing
-
-+ Fork the repository.
-
-+ Create a feature branch.
-
-+ Open a pull request with a clear description of changes.
-
-+ Please keep secrets out of commits. Use .env or the launcher to provide keys.
-
-## Contact / Credits
-
-+ Project: pawMYjob
-
-+ Built with: Playwright (crawler), sentence-transformers (embeddings), Gemini (LLM), Airflow (scheduler), LangChain (llm workflow orchestration), Flask (UI).
+- 系统只生成材料和提供下载，不自动提交申请。
+- `.env`、LinkedIn storage state、简历和生成材料都应留在受保护的 volume。
+- 现有 `.env` 中如曾放过真实 API key，建议立即轮换，并只用 `.env.example` 作为模板。

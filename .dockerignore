@@ -1,0 +1,8 @@
+.git
+.gitignore
+.DS_Store
+worker_env/.venv
+worker_env/stored_data
+launcher_logs
+__pycache__
+*.pyc

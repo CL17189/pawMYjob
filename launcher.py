@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Launcher: 提供一个本地网页用于输入 OPENAI_API_KEY、FIRECRAWL_API_KEY，上传 resume.md，
+Launcher: 提供一个本地网页用于输入 GEMINI_API_KEY，上传 resume.md，
 并在提交后：
   1) 将 resume.md 存入 worker_env/stored_data/resume.md
-  2) 将密钥写入 worker_env/.env (key names OPENAI_API_KEY, FIRECRAWL_API_KEY)
+  2) 将密钥写入项目 .env (key names GEMINI_API_KEY, FIRECRAWL_API_KEY)
   3) 启动 worker pipeline: uses worker venv python to run module worker_env.src.langgraph_flow
   4) 启动 worker 前端 (worker_env/src/app.py -> localhost:8000)
   5) 在默认浏览器打开结果页面 http://localhost:8000/
@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent
 WORKER_DIR = ROOT / "worker_env"
 WORKER_SRC = WORKER_DIR / "src"
 STORED_DATA = WORKER_DIR / "stored_data"
-ENV_PATH = WORKER_DIR / ".env"
+ENV_PATH = ROOT / ".env"
 
 # server ports
 LAUNCHER_PORT = 7000
@@ -47,8 +47,8 @@ HTML_INDEX = """
   <form method="post" enctype="multipart/form-data" action="{{ url_for('submit') }}">
     <label>Resume (.md file):</label><br/>
     <input type="file" name="resume" accept=".md" required><br/><br/>
-    <label>OPENAI_API_KEY (optional — enables LLM scoring):</label><br/>
-    <input type="text" name="openai" style="width:80%" placeholder="sk-..."><br/><br/>
+    <label>GEMINI_API_KEY (optional — enables scoring and generation):</label><br/>
+    <input type="text" name="gemini" style="width:80%" placeholder="AIza..."><br/><br/>
     <label>FIRECRAWL_API_KEY (optional):</label><br/>
     <input type="text" name="firecrawl" style="width:80%" placeholder="fc-..."><br/><br/>
     <label>Search query (default: data engineer):</label><br/>
@@ -110,10 +110,10 @@ def detect_worker_python():
     # fallback: system python
     return Path(sys.executable)
 
-def write_env_file(openai_key: str, fire_key: str):
+def write_env_file(gemini_key: str, fire_key: str):
     lines = []
-    if openai_key:
-        lines.append(f"OPENAI_API_KEY={openai_key}")
+    if gemini_key:
+        lines.append(f"GEMINI_API_KEY={gemini_key}")
     if fire_key:
         lines.append(f"FIRECRAWL_API_KEY={fire_key}")
     # also write WORKER_PY optionally
@@ -127,26 +127,26 @@ LOG_DIR.mkdir(exist_ok=True)
 PIPE_LOG = LOG_DIR / "worker_run.log"
 FRONTEND_LOG = LOG_DIR / "frontend.log"
 
-def run_worker_process(resume_path: Path, query: str, openai_key: str, fire_key: str):
+def run_worker_process(resume_path: Path, query: str, gemini_key: str, fire_key: str):
     """
     Start the worker pipeline using worker venv python.
     Two subprocesses are started:
       1) pipeline: python -m worker_env.src.langgraph_flow --resume <resume> --query "<query>"
       2) frontend: python -m worker_env.src.app (serves on port 8000)
-    Both are launched with env vars OPENAI_API_KEY and FIRECRAWL_API_KEY set.
+    Both are launched with env vars GEMINI_API_KEY and FIRECRAWL_API_KEY set.
     """
     ensure_worker_structure()
     python_exec = str(detect_worker_python())
     env = os.environ.copy()
-    if openai_key:
-        env["OPENAI_API_KEY"] = openai_key
+    if gemini_key:
+        env["GEMINI_API_KEY"] = gemini_key
     if fire_key:
         env["FIRECRAWL_API_KEY"] = fire_key
     # ensure PYTHONPATH includes worker_env so -m worker_env.src.* works
     env["PYTHONPATH"] = str(WORKER_DIR)
     # run pipeline command
     pipeline_cmd = [
-        python_exec, "-m", "worker_env.src.langgraph_flow",
+        python_exec, "-m", "worker_env.src.run_pipeline",
         "--resume", str(resume_path),
         "--query", query
     ]
@@ -181,15 +181,15 @@ def submit():
     dest = STORED_DATA / fname
     uploaded.save(str(dest))
 
-    openai_key = request.form.get("openai", "").strip()
+    gemini_key = request.form.get("gemini", "").strip()
     fire_key = request.form.get("firecrawl", "").strip()
     query = request.form.get("query", "data engineer").strip() or "data engineer"
 
     # write env
-    write_env_file(openai_key, fire_key)
+    write_env_file(gemini_key, fire_key)
 
     # launch worker (background)
-    p1, p2 = run_worker_process(dest, query, openai_key, fire_key)
+    p1, p2 = run_worker_process(dest, query, gemini_key, fire_key)
 
     # open frontend in browser (allow some startup time)
     def open_browser_later():

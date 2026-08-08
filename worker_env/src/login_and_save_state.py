@@ -1,18 +1,33 @@
+"""One-time headed login bootstrap for environments where the user can see a browser."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
 from playwright.sync_api import sync_playwright
 
-STATE_PATH = "../stored_data/linkedin_state.json"
+from .config import STATE_PATH
 
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=False)
-    context = browser.new_context()
-    page = context.new_page()
 
-    page.goto("https://www.linkedin.com/login")
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--state-path", default=str(STATE_PATH))
+    parser.add_argument("--url", default="https://www.linkedin.com/login")
+    args = parser.parse_args()
+    target = Path(args.state_path).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=False)
+        context = browser.new_context()
+        page = context.new_page()
+        page.goto(args.url)
+        print("请在打开的浏览器中完成登录；成功进入 LinkedIn 后回到终端按 Enter。")
+        input()
+        context.storage_state(path=str(target))
+        print(f"登录态已保存到 {target}")
+        browser.close()
 
-    print("请手动完成 LinkedIn 登录，然后不要关闭浏览器")
-    input("登录完成后，按 Enter 保存登录状态...")
 
-    context.storage_state(path=STATE_PATH)
-    print(f"登录态已保存到 {STATE_PATH}")
-
-    browser.close()
+if __name__ == "__main__":
+    main()

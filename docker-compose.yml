@@ -1,0 +1,30 @@
+services:
+  web:
+    build: .
+    command: python -m worker_env.src.app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-Pacific/Auckland}
+      PLAYWRIGHT_HEADLESS: "true"
+    volumes:
+      - ./worker_env/stored_data:/app/worker_env/stored_data
+      - ./config:/app/config
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    command: python -m worker_env.src.scheduler
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-Pacific/Auckland}
+      RUN_HOUR: "15"
+      RUN_MINUTE: "0"
+      PLAYWRIGHT_HEADLESS: "true"
+    volumes:
+      - ./worker_env/stored_data:/app/worker_env/stored_data
+      - ./config:/app/config
+    restart: unless-stopped

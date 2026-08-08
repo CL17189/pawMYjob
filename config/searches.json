@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Sweden · Data Engineer",
+    "country": "sweden",
+    "location": "Sweden",
+    "geo_id": "105117694",
+    "query": "data engineer",
+    "enabled": true,
+    "posted_window": "7days"
+  },
+  {
+    "name": "Auckland · Data Engineer",
+    "country": "new-zealand",
+    "location": "Auckland",
+    "geo_id": "",
+    "query": "data engineer",
+    "enabled": false,
+    "posted_window": "7days"
+  }
+]
