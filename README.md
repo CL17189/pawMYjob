@@ -91,7 +91,7 @@ Gemini 请求分为两种节流策略：匹配评估请求默认间隔 8 秒（`
 `apply` 仓库本身是一个 `SKILL.md` 规范，要求不虚构简历事实、输出 ATS 友好的 LaTeX，并在有 `pdflatex` 时编译 PDF。此项目用 Gemini agent 执行同一套约束；如果本地已 clone skill，可以设置：
 
 ```env
-APPLY_SKILL_PATH=/path/to/apply
+APPLY_SKILL_PATH=/app/apply
 COMPILE_LATEX=true
 ```
 

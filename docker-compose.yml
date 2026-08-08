@@ -12,6 +12,7 @@ services:
     volumes:
       - ./worker_env/stored_data:/app/worker_env/stored_data
       - ./config:/app/config
+      - ./apply:/app/apply:ro
     restart: unless-stopped
 
   scheduler:
@@ -27,4 +28,5 @@ services:
     volumes:
       - ./worker_env/stored_data:/app/worker_env/stored_data
       - ./config:/app/config
+      - ./apply:/app/apply:ro
     restart: unless-stopped
